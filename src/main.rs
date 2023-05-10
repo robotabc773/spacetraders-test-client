@@ -159,9 +159,6 @@ async fn ensure_systems_data () {
     //      this will allow getting more thorough information about 
     //      orbitals, faction, traits, and chart.
     //      Challenges: pagination
-    //                  ratelimits - maybe start developing a system to
-    //                               queue and run api requests within
-    //                               the rate limit?
     //                  reversing orbital reference? - 
     //                      I think I want waypoints to know what they
     //                      orbit and not the other way around
