@@ -10,11 +10,11 @@ use std::{
     sync::Arc
 };
 
-use inquire::{Select, Text, InquireError};
+use inquire::{Select, Text};
 use strum::{EnumIter, IntoEnumIterator, Display};
 use once_cell::sync::Lazy;
 use spacedust::apis::configuration::Configuration;
-use spacedust::models::System;
+use spacedust::models::{System, Waypoint};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use reqwest_middleware::{Middleware, ClientWithMiddleware};
@@ -158,19 +158,6 @@ async fn ensure_systems_data () {
         .expect("Postgres test query")
         .rows_affected() > 0;
 
-    //TODO: Change this to use systems.json only for the systems table
-    //      and then use get_systems_waypoints for the waypoints table
-    //      this will allow getting more thorough information about 
-    //      orbitals, faction, traits, and chart.
-    //      Challenges: pagination
-    //                  reversing orbital reference? - 
-    //                      I think I want waypoints to know what they
-    //                      orbit and not the other way around
-    //                  traits - do we keep all of them in an array
-    //                           or just the currently relevant ones 
-    //                           as bools
-    //                  chart - do we keep it at all?
-    //                  handle the possible error if the system isn't charted
     if !systems_exists || !waypoints_exists {
         let systems = spacedust::apis::systems_api::get_systems_all(&CONFIGURATION).await.expect("Get all systems");
         create_systems_table(&systems).await;
@@ -185,13 +172,19 @@ async fn ensure_systems_data () {
 //                            UTILITY
 //----------------------------------------------------------------------
 
+const MAX_PAGE_SIZE: i32 = 20;
+
 fn prompt_waypoint_symbol() -> String {
     Text::new("Enter waypoint symbol").prompt().expect("Prompt error")
 }
 
+fn prompt_system_symbol() -> String {
+    Text::new("Enter system symbol").prompt().expect("Prompt error")
+}
+
 async fn system_symbol_from_waypoint_symbol(waypoint_symbol: &str) -> String {
     let (system_symbol,): (String,) = sqlx::query_as("SELECT system_symbol FROM waypoints WHERE symbol = $1")
-        .bind(waypoint_symbol.clone())
+        .bind(waypoint_symbol)
         .fetch_one(get_global_db_pool().await)
         .await
         .expect("System symbol fetching");
@@ -205,7 +198,7 @@ async fn system_symbol_from_waypoint_symbol(waypoint_symbol: &str) -> String {
 #[derive(Debug, EnumIter, Display)]
 enum MenuChoice {
     GetAgent,
-    ListSystems,
+    ListWaypoints,
     GetWaypoint,
     Exit
 }
@@ -225,8 +218,32 @@ async fn get_agent() {
     }
 }
 
-async fn list_systems() {
-    todo!("ListSystems");
+async fn list_waypoints() {
+    let system_symbol = prompt_system_symbol();
+
+    let mut page = 1;
+    let mut waypoints: Vec<Waypoint> = Vec::new();
+    loop {
+        match spacedust::apis::systems_api::get_system_waypoints(&CONFIGURATION, &system_symbol, Some(page), Some(MAX_PAGE_SIZE)).await {
+            Ok(res) => {
+                waypoints.extend(res.data);
+                let meta = *(res.meta);
+                if meta.total > meta.page * meta.limit {
+                    page += 1;
+                }
+                else {
+                    break;
+                }
+            }
+            Err(err_res) => {
+                println!("{err_res:#?}");
+                break;
+            }
+        }
+    }
+    for waypoint in waypoints {
+        println!("{waypoint:#?}");
+    }
 }
 
 async fn get_waypoint() {
@@ -260,8 +277,8 @@ async fn main() {
                 MenuChoice::GetAgent => {
                     get_agent().await;
                 }
-                MenuChoice::ListSystems => {
-                    list_systems().await;
+                MenuChoice::ListWaypoints => {
+                    list_waypoints().await;
                 }
                 MenuChoice::GetWaypoint => {
                     get_waypoint().await;
