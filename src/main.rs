@@ -10,17 +10,19 @@ use std::{
     sync::Arc
 };
 
-use inquire::Select;
+use inquire::{Select, Text, InquireError};
 use strum::{EnumIter, IntoEnumIterator, Display};
 use once_cell::sync::Lazy;
-use spacedust::apis::agents_api::get_my_agent;
 use spacedust::apis::configuration::Configuration;
-use spacedust::apis::systems_api::get_systems_all;
 use spacedust::models::System;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use reqwest_middleware::{Middleware, ClientWithMiddleware};
 use tokio::sync::OnceCell;
+
+//----------------------------------------------------------------------
+//                              SETUP
+//----------------------------------------------------------------------
 
 fn setup_dotenv() {
     if dotenvy::dotenv().is_err() {
@@ -170,13 +172,35 @@ async fn ensure_systems_data () {
     //                  chart - do we keep it at all?
     //                  handle the possible error if the system isn't charted
     if !systems_exists || !waypoints_exists {
-        let systems = get_systems_all(&CONFIGURATION).await.expect("Get all systems");
+        let systems = spacedust::apis::systems_api::get_systems_all(&CONFIGURATION).await.expect("Get all systems");
         create_systems_table(&systems).await;
         create_waypoints_table(&systems).await;
         
     }
 
 }
+
+
+//----------------------------------------------------------------------
+//                            UTILITY
+//----------------------------------------------------------------------
+
+fn prompt_waypoint_symbol() -> String {
+    Text::new("Enter waypoint symbol").prompt().expect("Prompt error")
+}
+
+async fn system_symbol_from_waypoint_symbol(waypoint_symbol: &str) -> String {
+    let (system_symbol,): (String,) = sqlx::query_as("SELECT system_symbol FROM waypoints WHERE symbol = $1")
+        .bind(waypoint_symbol.clone())
+        .fetch_one(get_global_db_pool().await)
+        .await
+        .expect("System symbol fetching");
+    system_symbol
+}
+
+//----------------------------------------------------------------------
+//                          MENU CHOICES
+//----------------------------------------------------------------------
 
 #[derive(Debug, EnumIter, Display)]
 enum MenuChoice {
@@ -185,6 +209,40 @@ enum MenuChoice {
     GetWaypoint,
     Exit
 }
+
+async fn get_agent() {
+    if let Ok(res) = spacedust::apis::agents_api::get_my_agent(&CONFIGURATION).await {
+        println!("{:#?}", *(res.data));
+    }
+
+    match spacedust::apis::agents_api::get_my_agent(&CONFIGURATION).await {
+        Ok(res) => {
+            println!("{:#?}", *(res.data));
+        }
+        Err(err_res) => {
+            println!("{err_res:#?}");
+        }
+    }
+}
+
+async fn list_systems() {
+    todo!("ListSystems");
+}
+
+async fn get_waypoint() {
+    let waypoint_symbol = prompt_waypoint_symbol();
+    let system_symbol = system_symbol_from_waypoint_symbol(&waypoint_symbol).await;
+
+    match spacedust::apis::systems_api::get_waypoint(&CONFIGURATION, &system_symbol, &waypoint_symbol).await {
+        Ok(res) => {
+            println!("{:#?}", *(res.data));
+        }
+        Err(err_res) => {
+            println!("{err_res:#?}");
+        }
+    }
+}
+
 
 #[tokio::main]
 async fn main() {
@@ -200,24 +258,13 @@ async fn main() {
             }
             Ok(choice) => match choice {
                 MenuChoice::GetAgent => {
-                    if let Ok(res) = get_my_agent(&CONFIGURATION).await {
-                        println!("{:#?}", *(res.data));
-                    }
-
-                    match get_my_agent(&CONFIGURATION).await {
-                        Ok(res) => {
-                            println!("{:#?}", *(res.data));
-                        }
-                        Err(err_res) => {
-                            println!("{err_res:#?}");
-                        }
-                    }
+                    get_agent().await;
                 }
                 MenuChoice::ListSystems => {
-                    todo!("ListSystems");
+                    list_systems().await;
                 }
                 MenuChoice::GetWaypoint => {
-                    todo!("GetWaypoint");
+                    get_waypoint().await;
                 }
                 MenuChoice::Exit => {
                     println!("Bye!");
