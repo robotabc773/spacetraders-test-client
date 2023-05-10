@@ -10,6 +10,8 @@ use std::{
     sync::Arc
 };
 
+use inquire::Select;
+use strum::{EnumIter, IntoEnumIterator, Display};
 use once_cell::sync::Lazy;
 use spacedust::apis::agents_api::get_my_agent;
 use spacedust::apis::configuration::Configuration;
@@ -176,23 +178,51 @@ async fn ensure_systems_data () {
 
 }
 
+#[derive(Debug, EnumIter, Display)]
+enum MenuChoice {
+    GetAgent,
+    ListSystems,
+    GetWaypoint,
+    Exit
+}
+
 #[tokio::main]
 async fn main() {
+    //Setup
     setup_dotenv();
-
     ensure_systems_data().await;
-    
-    if let Ok(res) = get_my_agent(&CONFIGURATION).await {
-        println!("{:#?}", *(res.data));
-    }
 
-    for _ in 0..100 {
-        match get_my_agent(&CONFIGURATION).await {
-            Ok(res) => {
-                println!("{:#?}", *(res.data));
+    
+    loop {
+        match Select::new("Main Menu", MenuChoice::iter().collect()).prompt() {
+            Err(err) => {
+                println!("Prompt error! {err:#?}");
             }
-            Err(err_res) => {
-                println!("{err_res:#?}");
+            Ok(choice) => match choice {
+                MenuChoice::GetAgent => {
+                    if let Ok(res) = get_my_agent(&CONFIGURATION).await {
+                        println!("{:#?}", *(res.data));
+                    }
+
+                    match get_my_agent(&CONFIGURATION).await {
+                        Ok(res) => {
+                            println!("{:#?}", *(res.data));
+                        }
+                        Err(err_res) => {
+                            println!("{err_res:#?}");
+                        }
+                    }
+                }
+                MenuChoice::ListSystems => {
+                    todo!("ListSystems");
+                }
+                MenuChoice::GetWaypoint => {
+                    todo!("GetWaypoint");
+                }
+                MenuChoice::Exit => {
+                    println!("Bye!");
+                    break;
+                }
             }
         }
     }
