@@ -1,9 +1,12 @@
 #![allow(clippy::expect_used)]
 
 mod rate_limit;
+mod st_util;
 
 use crate::rate_limit::RateLimitMiddleware;
 
+use std::fmt::Debug;
+use std::future::Future;
 use std::{
     env,
     process,
@@ -14,7 +17,7 @@ use inquire::{Select, Text};
 use strum::{EnumIter, IntoEnumIterator, Display};
 use once_cell::sync::Lazy;
 use spacedust::apis::configuration::Configuration;
-use spacedust::models::{System, Waypoint};
+use spacedust::models::{System, Waypoint, GetSystemWaypoints200Response, Meta, GetContracts200Response, Contract};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use reqwest_middleware::{Middleware, ClientWithMiddleware};
@@ -91,12 +94,12 @@ async fn create_systems_table (systems : &[System]) {
             "INSERT INTO systems(symbol, sector_symbol, type, x, y, factions) "
             );
         query_builder.push_values(systems_chunk, |mut b, system| {
-            b.push_bind(system.symbol.clone())
-                .push_bind(system.sector_symbol.clone())
+            b.push_bind(&system.symbol)
+                .push_bind(&system.sector_symbol)
                 .push_bind(system.r#type.to_string())
                 .push_bind(system.x)
                 .push_bind(system.y)
-                .push_bind(system.factions.clone().into_iter().map(|x| x.symbol).collect::<Vec<String>>());
+                .push_bind(system.factions.iter().map(|x| &*x.symbol).collect::<Vec<&str>>());
         });
         query_builder.build().execute(&mut transaction).await.expect("Insert into systems table");
     }
@@ -132,9 +135,9 @@ async fn create_waypoints_table (systems : &[System]) {
             "INSERT INTO waypoints(symbol, type, system_symbol, x, y) "
             );
         query_builder.push_values(system.waypoints.iter(), |mut b, waypoint| {
-            b.push_bind(waypoint.symbol.clone())
+            b.push_bind(&waypoint.symbol)
                 .push_bind(waypoint.r#type.to_string())
-                .push_bind(system.symbol.clone())
+                .push_bind(&system.symbol)
                 .push_bind(waypoint.x)
                 .push_bind(waypoint.y);
         });
@@ -198,6 +201,8 @@ async fn system_symbol_from_waypoint_symbol(waypoint_symbol: &str) -> String {
 #[derive(Debug, EnumIter, Display)]
 enum MenuChoice {
     GetAgent,
+    ListContracts,
+    ListShips,
     ListWaypoints,
     GetWaypoint,
     Exit
@@ -218,32 +223,41 @@ async fn get_agent() {
     }
 }
 
-async fn list_waypoints() {
-    let system_symbol = prompt_system_symbol();
-
-    let mut page = 1;
-    let mut waypoints: Vec<Waypoint> = Vec::new();
-    loop {
-        match spacedust::apis::systems_api::get_system_waypoints(&CONFIGURATION, &system_symbol, Some(page), Some(MAX_PAGE_SIZE)).await {
-            Ok(res) => {
-                waypoints.extend(res.data);
-                let meta = *(res.meta);
-                if meta.total > meta.page * meta.limit {
-                    page += 1;
-                }
-                else {
-                    break;
-                }
-            }
-            Err(err_res) => {
-                println!("{err_res:#?}");
-                break;
+async fn list_contracts() {
+    match st_util::list_contracts().await {
+        Ok(contracts) => {
+            for contract in contracts {
+                println!("{contract:#?}");
             }
         }
+        Err(err) => println!("Error listing contracts: {err:#?}")
     }
-    for waypoint in waypoints {
-        println!("{waypoint:#?}");
+}
+
+async fn list_ships() {
+    match st_util::list_ships().await {
+        Ok(ships) => {
+            for ship in ships {
+                println!("{ship:#?}");
+            }
+        }
+        Err(err) => println!("Error listing contracts: {err:#?}")
     }
+}
+
+//TODO: have this populate more of the database with whatever useful information
+async fn list_waypoints() {
+    let system_symbol = &prompt_system_symbol();
+
+    match st_util::list_system_waypoints(system_symbol).await {
+        Ok(waypoints) => {
+            for waypoint in waypoints {
+                println!("{waypoint:#?}");
+            }
+        }
+        Err(err) => println!("Error listing waypoints: {err:#?}")
+    }
+
 }
 
 async fn get_waypoint() {
@@ -266,7 +280,6 @@ async fn main() {
     //Setup
     setup_dotenv();
     ensure_systems_data().await;
-
     
     loop {
         match Select::new("Main Menu", MenuChoice::iter().collect()).prompt() {
@@ -274,15 +287,11 @@ async fn main() {
                 println!("Prompt error! {err:#?}");
             }
             Ok(choice) => match choice {
-                MenuChoice::GetAgent => {
-                    get_agent().await;
-                }
-                MenuChoice::ListWaypoints => {
-                    list_waypoints().await;
-                }
-                MenuChoice::GetWaypoint => {
-                    get_waypoint().await;
-                }
+                MenuChoice::GetAgent => get_agent().await,
+                MenuChoice::ListContracts => list_contracts().await,
+                MenuChoice::ListShips => list_ships().await,
+                MenuChoice::ListWaypoints => list_waypoints().await,
+                MenuChoice::GetWaypoint => get_waypoint().await,
                 MenuChoice::Exit => {
                     println!("Bye!");
                     break;
