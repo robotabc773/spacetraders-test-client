@@ -6,7 +6,6 @@ mod st_util;
 use crate::rate_limit::RateLimitMiddleware;
 
 use std::fmt::Debug;
-use std::future::Future;
 use std::{
     env,
     process,
@@ -17,7 +16,7 @@ use inquire::{Select, Text};
 use strum::{EnumIter, IntoEnumIterator, Display};
 use once_cell::sync::Lazy;
 use spacedust::apis::configuration::Configuration;
-use spacedust::models::{System, Waypoint, GetSystemWaypoints200Response, Meta, GetContracts200Response, Contract};
+use spacedust::models::System;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Pool, Postgres, QueryBuilder};
 use reqwest_middleware::{Middleware, ClientWithMiddleware};
@@ -174,8 +173,6 @@ async fn ensure_systems_data () {
 //----------------------------------------------------------------------
 //                            UTILITY
 //----------------------------------------------------------------------
-
-const MAX_PAGE_SIZE: i32 = 20;
 
 fn prompt_waypoint_symbol() -> String {
     Text::new("Enter waypoint symbol").prompt().expect("Prompt error")

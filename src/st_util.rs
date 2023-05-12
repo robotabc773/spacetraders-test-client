@@ -10,7 +10,7 @@ use spacedust::{
     models::{Contract, Faction, Ship, System, Waypoint},
 };
 
-use crate::config::CONFIGURATION;
+use crate::CONFIGURATION;
 
 const MAX_PAGE_SIZE: i32 = 20;
 
